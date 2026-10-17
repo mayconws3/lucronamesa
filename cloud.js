@@ -104,6 +104,7 @@
     qs('#authShell').hidden = true;
     qs('#appShell').hidden = false;
     qs('#accountEmail').textContent = (currentUser.email || '') + (currentProfile?.role === 'admin' ? ' · ADMIN' : ' · CLIENTE');
+    syncAdminShortcut();
   }
 
   function normalizeData(data, name, type) {
@@ -256,8 +257,24 @@
 
   function subscriptionDate(date){if(!date)return 'Sem prazo definido';return new Date(date).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'})}
   function subscriptionStatus(profile){if(profile.role==='admin')return 'Administrador';if(!profile.subscription_expires_at)return 'Sem prazo';return new Date(profile.subscription_expires_at).getTime()>Date.now()?'Ativo':'Expirado'}
+  function syncAdminShortcut(){
+    const shortcut=qs('#adminCentralShortcut');
+    if(!shortcut)return;
+    const admin=currentProfile?.role==='admin';
+    shortcut.hidden=!admin;
+    shortcut.style.display=admin?'inline-flex':'none';
+  }
+  window.openAdminCentral=function(){
+    if(currentProfile?.role!=='admin'){toast('Acesso restrito ao administrador');return}
+    renderCentral();
+    document.querySelectorAll('.nav button,.view').forEach(x=>x.classList.remove('active'));
+    qs('#centralNav')?.classList.add('active');
+    qs('#central')?.classList.add('active');
+    qs('#central')?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
   function renderCentral() {
     const nav=qs('#centralNav'),section=qs('#central'),admin=currentProfile?.role==='admin';
+    syncAdminShortcut();
     nav.hidden=!admin;
     nav.style.display=admin?'inline-flex':'none';
     nav.setAttribute('aria-hidden',admin?'false':'true');
