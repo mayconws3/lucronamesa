@@ -119,12 +119,12 @@
   }
 
   async function loadProfile() {
-    const { data, error } = await api.from('profiles').select('id,email,full_name,role,created_at').eq('id', currentUser.id).single();
+    const { data, error } = await api.from('profiles').select('id,email,full_name,role,created_at,subscription_expires_at').eq('id', currentUser.id).single();
     if (error) throw error;
     currentProfile = data;
     profiles = [data];
     if (data.role === 'admin') {
-      const result = await api.from('profiles').select('id,email,full_name,role,created_at').order('full_name');
+      const result = await api.from('profiles').select('id,email,full_name,role,created_at,subscription_expires_at').order('full_name');
       if (result.error) throw result.error;
       profiles = result.data || [];
     }
@@ -253,23 +253,36 @@
     if (files.length) setTimeout(() => processMenuFiles(files), 150);
   }
 
-  function renderCentral() {
-    const nav = qs('#centralNav');
-    const section = qs('#central');
-    const admin = currentProfile?.role === 'admin';
-    nav.hidden = !admin;
-    if (!admin) {
-      section.innerHTML = '';
-      return;
-    }
-    const businessesByOwner = new Map();
-    state.businesses.forEach(item => businessesByOwner.set(item.ownerId, (businessesByOwner.get(item.ownerId) || 0) + 1));
-    const productCount = state.businesses.reduce((sum, item) => sum + (item.data.products?.length || 0), 0);
-    section.innerHTML = head('Central administrativa', 'Visão geral dos clientes e empresas cadastrados no Lucro na Mesa.') +
-      `<div class="stats"><div class="stat"><label>Clientes cadastrados</label><strong>${profiles.filter(item => item.role !== 'admin').length}</strong><small>Contas de clientes</small></div><div class="stat"><label>Empresas</label><strong>${state.businesses.length}</strong><small>Todas as operações</small></div><div class="stat"><label>Produtos</label><strong>${productCount}</strong><small>Somados em todas as empresas</small></div><div class="stat attn"><label>Administrador</label><strong>1</strong><small>Acesso total protegido</small></div></div>` +
-      `<div class="central-grid">${profiles.map(item => `<article class="central-client"><h3>${esc(item.full_name || item.email || 'Usuário')}</h3><p>${esc(item.email || '')}</p><p><strong>${businessesByOwner.get(item.id) || 0}</strong> empresa(s) · ${item.role === 'admin' ? 'Administrador' : 'Cliente'}</p></article>`).join('')}</div>`;
-  }
 
+  function subscriptionDate(date){if(!date)return 'Sem prazo definido';return new Date(date).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'})}
+  function subscriptionStatus(profile){if(profile.role==='admin')return 'Administrador';if(!profile.subscription_expires_at)return 'Sem prazo';return new Date(profile.subscription_expires_at).getTime()>Date.now()?'Ativo':'Expirado'}
+  function renderCentral() {
+    const nav=qs('#centralNav'),section=qs('#central'),admin=currentProfile?.role==='admin';
+    nav.hidden=!admin;
+    if(!admin){section.innerHTML='';return}
+    const byOwner=new Map();state.businesses.forEach(b=>byOwner.set(b.ownerId,(byOwner.get(b.ownerId)||0)+1));
+    const clients=profiles.filter(p=>p.role!=='admin'),active=clients.filter(p=>subscriptionStatus(p)==='Ativo').length,expired=clients.filter(p=>subscriptionStatus(p)==='Expirado').length;
+    section.innerHTML=head('Central administrativa','Gerencie clientes, períodos gratuitos e vencimentos de acesso.')+
+      '<div class="stats"><div class="stat"><label>Clientes</label><strong>'+clients.length+'</strong></div><div class="stat"><label>Ativos</label><strong>'+active+'</strong></div><div class="stat"><label>Expirados</label><strong>'+expired+'</strong></div><div class="stat"><label>Empresas</label><strong>'+state.businesses.length+'</strong></div></div>'+
+      '<div class="business-note"><strong>Controle de acesso:</strong> os períodos são definidos por cliente e armazenados no servidor. Quando vencem, o sistema bloqueia o acesso às empresas sem apagar os dados. A conta administrativa não expira.</div>'+
+      '<div class="central-grid">'+profiles.map(p=>{const status=subscriptionStatus(p),isAdmin=p.role==='admin',date=p.subscription_expires_at;return '<article class="central-client"><h3>'+esc(p.full_name||p.email||'Usuário')+'</h3><p>'+esc(p.email||'')+'</p><p><strong>'+status+'</strong> · '+(byOwner.get(p.id)||0)+' empresa(s)</p>'+(isAdmin?'<p>Acesso administrativo permanente.</p>':'<p>Vencimento: <strong>'+subscriptionDate(date)+'</strong></p><div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">'+[30,90,180,365].map(days=>'<button type="button" class="btn small" data-sub-user="'+p.id+'" data-sub-days="'+days+'">'+(days===30?'30 dias':days===90?'3 meses':days===180?'6 meses':'1 ano')+'</button>').join('')+'</div><div class="field"><label>Definir vencimento personalizado</label><input type="date" id="subdate-'+p.id+'" value="'+(date?new Date(date).toISOString().slice(0,10):'')+'"></div><button type="button" class="btn small primary" data-sub-save="'+p.id+'">Salvar vencimento</button>')+'</article>'}).join('')+'</div>';
+    section.querySelectorAll('[data-sub-user]').forEach(btn=>btn.onclick=()=>changeSubscription(btn.dataset.subUser,Number(btn.dataset.subDays)));
+    section.querySelectorAll('[data-sub-save]').forEach(btn=>{btn.onclick=()=>{const v=qs('#subdate-'+btn.dataset.subSave)?.value;if(!v){toast('Selecione uma data');return}changeSubscription(btn.dataset.subSave,null,v)}});
+  }
+  async function changeSubscription(id,days,dateValue){
+    if(currentProfile?.role!=='admin')return;
+    const profile=profiles.find(p=>p.id===id&&p.role!=='admin');if(!profile)return;
+    let expiry;
+    if(days){expiry=new Date();expiry.setUTCDate(expiry.getUTCDate()+days)}
+    else {expiry=new Date(dateValue+'T23:59:59-03:00')}
+    if(!Number.isFinite(expiry.getTime())){toast('Data inválida');return}
+    if(!confirm('Atualizar o acesso de '+(profile.email||profile.full_name)+' até '+subscriptionDate(expiry.toISOString())+'?'))return;
+    const {data,error}=await api.rpc('admin_set_subscription',{p_user_id:id,p_expires_at:expiry.toISOString()});
+    if(error){console.error(error);toast('Erro ao atualizar acesso: '+error.message);return}
+    profile.subscription_expires_at=data;
+    renderCentral();
+    toast('Prazo de acesso atualizado');
+  }
   function installCloudOverrides() {
     const localRenderAll = renderAll;
     renderCompanySwitch = cloudCompanySwitch;
@@ -294,6 +307,9 @@
     currentUser = session.user;
     try {
       await loadProfile();
+      if(currentProfile.role!=='admin'&&(!currentProfile.subscription_expires_at||new Date(currentProfile.subscription_expires_at).getTime()<=Date.now())){
+        loadedUserId='';showAuth();authMessage('Seu período de acesso terminou. Entre em contato com o administrador para renovar.');return;
+      }
       await loadBusinesses();
       showApp();
       renderAll();
