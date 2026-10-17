@@ -103,7 +103,7 @@
   function showApp() {
     qs('#authShell').hidden = true;
     qs('#appShell').hidden = false;
-    qs('#accountEmail').textContent = currentUser.email || '';
+    qs('#accountEmail').textContent = (currentUser.email || '') + (currentProfile?.role === 'admin' ? ' · ADMIN' : ' · CLIENTE');
   }
 
   function normalizeData(data, name, type) {
@@ -259,7 +259,10 @@
   function renderCentral() {
     const nav=qs('#centralNav'),section=qs('#central'),admin=currentProfile?.role==='admin';
     nav.hidden=!admin;
+    nav.style.display=admin?'inline-flex':'none';
+    nav.setAttribute('aria-hidden',admin?'false':'true');
     if(!admin){section.innerHTML='';return}
+    nav.title='Central de gestão de clientes e assinaturas';
     const byOwner=new Map();state.businesses.forEach(b=>byOwner.set(b.ownerId,(byOwner.get(b.ownerId)||0)+1));
     const clients=profiles.filter(p=>p.role!=='admin'),active=clients.filter(p=>subscriptionStatus(p)==='Ativo').length,expired=clients.filter(p=>subscriptionStatus(p)==='Expirado').length;
     section.innerHTML=head('Central administrativa','Gerencie clientes, períodos gratuitos e vencimentos de acesso.')+
