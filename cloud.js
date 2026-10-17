@@ -9,6 +9,8 @@
   let started = false;
   let loadedUserId = '';
   let flushTimer;
+  let flushingPromise = null;
+  let signingOut = false;
   const pendingWrites = new Map();
 
   const qs = selector => document.querySelector(selector);
@@ -170,20 +172,27 @@
 
   async function flushWrites() {
     clearTimeout(flushTimer);
-    if (!pendingWrites.size) return;
-    setSync('Salvando…');
-    for (const [id, payload] of [...pendingWrites]) {
-      const { error } = await api.from('businesses').update(payload).eq('id', id);
-      if (error) {
-        console.error(error);
-        setSync('Falha ao sincronizar', true);
-        flushTimer = setTimeout(flushWrites, 5000);
-        return;
+    if(flushingPromise)return flushingPromise.then(()=>pendingWrites.size?flushWrites():true);
+    if(!pendingWrites.size)return true;
+    flushingPromise=(async()=>{
+      setSync('Salvando na nuvem…');
+      for(const [id,payload] of [...pendingWrites]){
+        const {data,error}=await api.from('businesses').update(payload).eq('id',id).select('id,updated_at');
+        if(error||!data?.length){
+          console.error('Falha ao persistir empresa',id,error);
+          setSync('Não salvo — tente novamente',true);
+          return false;
+        }
+        // Uma edição mais recente nunca deve ser descartada pela resposta de uma gravação anterior.
+        if(pendingWrites.get(id)===payload)pendingWrites.delete(id);
       }
-      pendingWrites.delete(id);
+      if(!pendingWrites.size){setSync('Salvo na nuvem ✓');return true}
+      return false;
+    })();
+    try{return await flushingPromise}finally{
+      flushingPromise=null;
+      if(pendingWrites.size&&!signingOut){clearTimeout(flushTimer);flushTimer=setTimeout(flushWrites,5000)}
     }
-    setSync('Salvo na nuvem');
-    setTimeout(() => setSync(''), 1800);
   }
 
   function cloudSave() {
@@ -200,7 +209,7 @@
       updated_at: business.updatedAt
     });
     renderAll();
-    setSync('Alterações pendentes');
+    setSync('Salvamento automático pendente…');
     clearTimeout(flushTimer);
     flushTimer = setTimeout(flushWrites, 650);
   }
@@ -372,10 +381,26 @@
   }
 
   window.logout = async function () {
-    await flushWrites();
-    await api.auth.signOut();
-    showAuth();
+    if(signingOut)return;
+    signingOut=true;
+    try{
+      // A sessão só é encerrada depois de o banco confirmar todas as alterações.
+      const ok=await flushWrites();
+      if(!ok||pendingWrites.size){
+        toast('Não foi possível salvar na nuvem. Verifique sua conexão e tente sair novamente.');
+        setSync('Não salvo — saída cancelada',true);
+        return;
+      }
+      await api.auth.signOut();
+      loadedUserId='';
+      showAuth();
+    }catch(error){console.error(error);toast('Não foi possível sair com segurança: '+(error?.message||error))}
+    finally{signingOut=false}
   };
+  window.addEventListener('pagehide',()=>{if(pendingWrites.size)flushWrites()});
+  window.addEventListener('beforeunload',event=>{
+    if(pendingWrites.size){event.preventDefault();event.returnValue='Há dados aguardando salvamento na nuvem.'}
+  });
 
   window.showConfigurationMessage = function () {
     qs('#authTitle').textContent = 'Ambiente em preparação';
