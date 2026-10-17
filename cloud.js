@@ -212,9 +212,12 @@
       const owner = currentProfile.role === 'admin' && item.ownerId !== currentUser.id ? ` · ${emailById.get(item.ownerId) || 'cliente'}` : '';
       return `<option value="${item.id}" ${item.id === state.activeBusinessId ? 'selected' : ''}>${esc(item.name + owner)}</option>`;
     }).join('');
+    select.disabled=currentProfile.role!=='admin';
+    const add=qs('.company-add');if(add){add.hidden=currentProfile.role!=='admin';add.style.display=currentProfile.role==='admin'?'':'none'}
   }
 
   function cloudSwitchBusiness(id) {
+    if(currentProfile?.role!=='admin'){toast('Troca de empresa exclusiva do administrador');renderCompanySwitch();return}
     const business = state.businesses.find(item => item.id === id);
     if (!business) return;
     state.activeBusinessId = id;
@@ -227,6 +230,7 @@
   }
 
   async function cloudCreateBusiness() {
+    if(currentProfile?.role!=='admin'){toast('Cadastro de empresa exclusivo do administrador');return}
     const form = qs('#businessForm');
     const name = form.name.value.trim();
     const type = form.type.value;
@@ -282,10 +286,15 @@
     nav.title='Central de gestão de clientes e assinaturas';
     const byOwner=new Map();state.businesses.forEach(b=>byOwner.set(b.ownerId,(byOwner.get(b.ownerId)||0)+1));
     const clients=profiles.filter(p=>p.role!=='admin'),active=clients.filter(p=>subscriptionStatus(p)==='Ativo').length,expired=clients.filter(p=>subscriptionStatus(p)==='Expirado').length;
+    const b=state.businesses.find(x=>x.id===state.activeBusinessId),o=b?profiles.find(x=>x.id===b.ownerId):null,d=b?.data||{},ps=d.products||[],ins=d.inputs||[],fx=d.fixedCosts||[],imap=new Map(ins.map(x=>[x.id,x]));
+    const fixed=fx.reduce((n,x)=>n+Math.max(0,Number(x.value)||0),0),vol=Number(d.monthlySalesUnits)||0,rate=d.allocateFixedCosts&&vol>0?fixed/vol:0;
+    const calc=p=>((p.ingredients||[]).reduce((n,x)=>n+(Number(imap.get(x.inputId)?.cost)||0)*(Number(x.qty)||0),0)+Number(p.labor||0))*(1+Number(p.loss||0)/100)+rate;
+    const priced=ps.filter(p=>Number(p.price)>0),margin=priced.length?priced.reduce((n,p)=>n+(Number(p.price)-calc(p))/Number(p.price)*100,0)/priced.length:null,losses=priced.filter(p=>calc(p)>=Number(p.price)).length;
+    const details=b?'<div class="panel"><h2>🏪 '+esc(b.name)+'</h2><p>Empresa selecionada na Visão geral · '+esc(b.type||'Estabelecimento')+'</p><div class="stats"><div class="stat"><label>Produtos</label><strong>'+ps.length+'</strong></div><div class="stat"><label>Insumos</label><strong>'+ins.length+'</strong></div><div class="stat"><label>Fixos mensais</label><strong>'+money(fixed)+'</strong></div><div class="stat"><label>Produtos com custo ≥ preço</label><strong>'+losses+'</strong></div></div><p><strong>Responsável:</strong> '+esc(o?.full_name||'Não informado')+' · '+esc(o?.email||'Não informado')+'</p><p><strong>Assinatura:</strong> '+esc(o?subscriptionStatus(o):'Não identificado')+' · <strong>Vencimento:</strong> '+(o?.role==='admin'?'Permanente':subscriptionDate(o?.subscription_expires_at))+'</p><p><strong>Cadastro:</strong> '+(b.createdAt?new Date(b.createdAt).toLocaleString('pt-BR'):'—')+' · <strong>Última alteração:</strong> '+(b.updatedAt?new Date(b.updatedAt).toLocaleString('pt-BR'):'—')+'</p><p><strong>Margem média estimada:</strong> '+(margin===null?'—':margin.toFixed(1)+'%')+' · <strong>Histórico de custos:</strong> '+(d.costHistory||[]).length+' alterações</p><p><strong>Rateio fixo:</strong> '+(d.allocateFixedCosts?'Ativo':'Desativado')+' · '+vol+' unidades/mês · '+money(rate)+'/unidade</p><h3>Produtos e preços</h3><div class="tablewrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Custo</th><th>Preço</th><th>Margem</th></tr></thead><tbody>'+ps.slice(0,80).map(p=>{const c=calc(p),v=Number(p.price)||0;return '<tr><td>'+esc(p.name)+'</td><td>'+esc(p.category||'—')+'</td><td>'+money(c)+'</td><td>'+money(v)+'</td><td>'+(v?((v-c)/v*100).toFixed(1)+'%':'—')+'</td></tr>'}).join('')+'</tbody></table></div><p class="hint">Indicadores estimados com dados cadastrados; não representam vendas realizadas.</p></div>':'';
     section.innerHTML=head('Central administrativa','Gerencie clientes, períodos gratuitos e vencimentos de acesso.')+
       '<div class="stats"><div class="stat"><label>Clientes</label><strong>'+clients.length+'</strong></div><div class="stat"><label>Ativos</label><strong>'+active+'</strong></div><div class="stat"><label>Expirados</label><strong>'+expired+'</strong></div><div class="stat"><label>Empresas</label><strong>'+state.businesses.length+'</strong></div></div>'+
       '<div class="business-note"><strong>Controle de acesso:</strong> os períodos são definidos por cliente e armazenados no servidor. Quando vencem, o sistema bloqueia o acesso às empresas sem apagar os dados. A conta administrativa não expira.</div>'+
-      '<div class="central-grid">'+profiles.map(p=>{const status=subscriptionStatus(p),isAdmin=p.role==='admin',date=p.subscription_expires_at;return '<article class="central-client"><h3>'+esc(p.full_name||p.email||'Usuário')+'</h3><p>'+esc(p.email||'')+'</p><p><strong>'+status+'</strong> · '+(byOwner.get(p.id)||0)+' empresa(s)</p>'+(isAdmin?'<p>Acesso administrativo permanente.</p>':'<p>Vencimento: <strong>'+subscriptionDate(date)+'</strong></p><div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">'+[30,90,180,365].map(days=>'<button type="button" class="btn small" data-sub-user="'+p.id+'" data-sub-days="'+days+'">'+(days===30?'30 dias':days===90?'3 meses':days===180?'6 meses':'1 ano')+'</button>').join('')+'</div><div class="field"><label>Definir vencimento personalizado</label><input type="date" id="subdate-'+p.id+'" value="'+(date?new Date(date).toISOString().slice(0,10):'')+'"></div><button type="button" class="btn small primary" data-sub-save="'+p.id+'">Salvar vencimento</button>')+'</article>'}).join('')+'</div>';
+      details + '<div class="central-grid">'+profiles.map(p=>{const status=subscriptionStatus(p),isAdmin=p.role==='admin',date=p.subscription_expires_at;return '<article class="central-client"><h3>'+esc(p.full_name||p.email||'Usuário')+'</h3><p>'+esc(p.email||'')+'</p><p><strong>'+status+'</strong> · '+(byOwner.get(p.id)||0)+' empresa(s)</p>'+(isAdmin?'<p>Acesso administrativo permanente.</p>':'<p>Vencimento: <strong>'+subscriptionDate(date)+'</strong></p><div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">'+[30,90,180,365].map(days=>'<button type="button" class="btn small" data-sub-user="'+p.id+'" data-sub-days="'+days+'">'+(days===30?'30 dias':days===90?'3 meses':days===180?'6 meses':'1 ano')+'</button>').join('')+'</div><div class="field"><label>Definir vencimento personalizado</label><input type="date" id="subdate-'+p.id+'" value="'+(date?new Date(date).toISOString().slice(0,10):'')+'"></div><button type="button" class="btn small primary" data-sub-save="'+p.id+'">Salvar vencimento</button>')+'</article>'}).join('')+'</div>';
     section.querySelectorAll('[data-sub-user]').forEach(btn=>btn.onclick=()=>changeSubscription(btn.dataset.subUser,Number(btn.dataset.subDays)));
     section.querySelectorAll('[data-sub-save]').forEach(btn=>{btn.onclick=()=>{const v=qs('#subdate-'+btn.dataset.subSave)?.value;if(!v){toast('Selecione uma data');return}changeSubscription(btn.dataset.subSave,null,v)}});
   }
