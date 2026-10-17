@@ -70,8 +70,10 @@
             qs('#authEmail').value = email;
           }
         } else {
-          const { error } = await api.auth.signInWithPassword({ email, password });
+          const { data, error } = await Promise.race([api.auth.signInWithPassword({ email, password }), new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo esgotado na autenticação.')), 12000))]);
           if (error) throw error;
+          if (!data?.session?.user) throw new Error('O servidor não retornou uma sessão válida.');
+          await handleSession(data.session);
         }
       } catch (error) {
         authMessage(readableAuthError(error));
@@ -299,7 +301,7 @@
       console.error(error);
       loadedUserId = '';
       showAuth();
-      authMessage('Não foi possível carregar os dados da conta. Tente novamente em instantes.');
+      authMessage('Falha ao carregar a conta: ' + String(error?.message || error));
     }
   }
 
@@ -331,8 +333,6 @@
     setupAuth();
     installCloudOverrides();
     api.auth.onAuthStateChange((_event, session) => setTimeout(() => handleSession(session), 0));
-    const { data, error } = await api.auth.getSession();
-    if (error) authMessage(readableAuthError(error));
-    await handleSession(data?.session || null);
+    // Sessão inicial processada pelo evento de autenticação.
   };
 })();
