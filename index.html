@@ -60,7 +60,7 @@
 <div class="notice" id="notice"></div>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"></script>
-<script src="cloud.js?v=20261019-owner-rpc-6"></script>
+<script src="cloud.js?v=20261019-direct-save-7"></script>
 <script>
 const money=n=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(n)||0);
 const alphaText=(a,b)=>String(a||'').localeCompare(String(b||''),'pt-BR',{sensitivity:'base'});
@@ -95,7 +95,7 @@ let state=loadState();
 state.businesses.forEach(business=>business.data.fixedCosts=business.data.fixedCosts||[]);
 const activeBusiness=()=>state.businesses.find(x=>x.id===state.activeBusinessId)||state.businesses[0];
 let db=activeBusiness().data;let filter='';let category='Todos';
-function save(){const business=activeBusiness();business.data=db;business.name=db.company;business.type=db.type||business.type;localStorage.setItem('hi-state',JSON.stringify(state));localStorage.setItem('hi-db',JSON.stringify(db));renderAll()}
+function save(){if(typeof window.lnmQueueSave==='function')return window.lnmQueueSave();if(window.LNM_CONFIG?.supabaseUrl)throw new Error('Salvamento na nuvem não inicializado');const business=activeBusiness();business.data=db;business.name=db.company;business.type=db.type||business.type;localStorage.setItem('hi-state',JSON.stringify(state));localStorage.setItem('hi-db',JSON.stringify(db));renderAll()}
 function directCost(p,override){const ing=p.ingredients.reduce((s,r)=>{const it=db.inputs.find(i=>i.id===r.inputId);const c=override?.id===it?.id?override.cost:it?.cost;return s+(Number(c)||0)*(Number(r.qty)||0)},0);return (ing+Number(p.labor||0))*(1+Number(p.loss||0)/100)}
 function monthlyFixedTotal(){return (db.fixedCosts||[]).reduce((sum,item)=>sum+Math.max(0,Number(item.value)||0),0)}
 function fixedPerUnit(){const n=Number(db.monthlySalesUnits)||0;return db.allocateFixedCosts&&n>0?monthlyFixedTotal()/n:0}
