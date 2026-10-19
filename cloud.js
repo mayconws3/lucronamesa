@@ -212,9 +212,12 @@
           if(readError||!stored)throw readError||new Error('Empresa não encontrada ao reler o banco');
           const canonical=o=>JSON.stringify(o,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
           if(canonical(stored.data)!==canonical(payload.data))throw new Error('Verificação falhou: dados não persistiram no banco');
-          if(stored.updated_at!==payload.updated_at)throw new Error('Versão salva não corresponde à edição enviada');
+          // O gatilho do Supabase define updated_at no servidor; nunca comparar com o relógio do navegador.
+          if(!stored.updated_at)throw new Error('Banco não retornou a data da gravação');
           if(pendingWrites.get(id)===payload){
             pendingWrites.delete(id);clearBackup(id);
+            const savedBusiness=state.businesses.find(b=>b.id===id);
+            if(savedBusiness)savedBusiness.updatedAt=stored.updated_at;
           }
         }catch(error){
           console.error('Falha no salvamento',id,error);
