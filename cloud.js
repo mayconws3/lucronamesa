@@ -203,9 +203,10 @@
       setSync('Salvando na nuvem…');
       for(const [id,payload] of [...pendingWrites]){
         try{
-          const {data,error}=await api.from('businesses').update({
-            name:payload.name,type:payload.type,data:payload.data,updated_at:payload.updated_at
-          }).eq('id',id).select('id,data,updated_at').maybeSingle();
+          // Gravação atômica com verificação de propriedade no servidor.
+          const {data,error}=await api.rpc('save_my_business',{
+            p_business_id:id,p_name:payload.name,p_type:payload.type,p_data:payload.data
+          });
           if(error||!data){throw error||new Error('Banco não confirmou a atualização da empresa');}
           // Validação independente: uma nova consulta ao banco é obrigatória.
           const {data:stored,error:readError}=await api.from('businesses').select('id,owner_id,name,data,updated_at').eq('id',id).maybeSingle();
@@ -222,7 +223,7 @@
         }catch(error){
           console.error('Falha no salvamento',id,error);
           setSync('ERRO: dados não salvos na nuvem',true);
-          toast('Falha ao salvar: '+(error?.message||'verifique a conexão'));
+          console.warn('Salvamento será tentado novamente; backup local preservado');
           return false;
         }
       }
