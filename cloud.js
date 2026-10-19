@@ -210,7 +210,7 @@
           // A resposta precisa conter exatamente o conteúdo que acabamos de salvar.
           if(JSON.stringify(data.data)!==JSON.stringify(payload.data)){
             // Comparação por conteúdo, independente da ordem das chaves JSON.
-            const canonical=o=>JSON.stringify(o,Object.keys(o||{}).sort());
+            const canonical=o=>JSON.stringify(o,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
             if(canonical(data.data)!==canonical(payload.data))throw new Error('O banco retornou dados diferentes do cadastro');
           }
           if(pendingWrites.get(id)===payload){
