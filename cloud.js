@@ -388,7 +388,7 @@
   function installCloudOverrides() {
     const localRenderAll = renderAll;
     renderCompanySwitch = cloudCompanySwitch;
-    save = cloudSave;
+    window.lnmQueueSave = cloudSave;
     window.save = cloudSave;
     window.lnmSaveAndConfirm = async () => {cloudSave();return await flushWrites()};
     switchBusiness = cloudSwitchBusiness;
