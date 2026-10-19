@@ -386,6 +386,7 @@
     renderCompanySwitch = cloudCompanySwitch;
     save = cloudSave;
     window.save = cloudSave;
+    window.lnmSaveAndConfirm = async () => {cloudSave();return await flushWrites()};
     switchBusiness = cloudSwitchBusiness;
     createBusiness = cloudCreateBusiness;
     renderAll = function () {
