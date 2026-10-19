@@ -207,12 +207,12 @@
             name:payload.name,type:payload.type,data:payload.data,updated_at:payload.updated_at
           }).eq('id',id).select('id,data,updated_at').maybeSingle();
           if(error||!data){throw error||new Error('Banco não confirmou a atualização da empresa');}
-          // A resposta precisa conter exatamente o conteúdo que acabamos de salvar.
-          if(JSON.stringify(data.data)!==JSON.stringify(payload.data)){
-            // Comparação por conteúdo, independente da ordem das chaves JSON.
-            const canonical=o=>JSON.stringify(o,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
-            if(canonical(data.data)!==canonical(payload.data))throw new Error('O banco retornou dados diferentes do cadastro');
-          }
+          // Validação independente: uma nova consulta ao banco é obrigatória.
+          const {data:stored,error:readError}=await api.from('businesses').select('id,owner_id,name,data,updated_at').eq('id',id).maybeSingle();
+          if(readError||!stored)throw readError||new Error('Empresa não encontrada ao reler o banco');
+          const canonical=o=>JSON.stringify(o,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
+          if(canonical(stored.data)!==canonical(payload.data))throw new Error('Verificação falhou: dados não persistiram no banco');
+          if(stored.updated_at!==payload.updated_at)throw new Error('Versão salva não corresponde à edição enviada');
           if(pendingWrites.get(id)===payload){
             pendingWrites.delete(id);clearBackup(id);
           }
@@ -223,7 +223,7 @@
           return false;
         }
       }
-      if(!pendingWrites.size){setSync('Salvo na nuvem ✓');return true}
+      if(!pendingWrites.size){setSync('Salvo e verificado no banco ✓');return true}
       return true;
     })();
     try{return await flushingPromise}finally{
@@ -234,7 +234,7 @@
 
   function cloudSave() {
     const business = activeBusiness();
-    if (!business) return;
+    if (!business || !currentUser?.id) {setSync('ERRO: sessão ou empresa não encontrada',true);return}
     business.data = db;
     business.name = db.company;
     business.type = db.type || business.type;
