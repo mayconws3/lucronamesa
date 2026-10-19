@@ -12,6 +12,9 @@
   let flushingPromise = null;
   let signingOut = false;
   const pendingWrites = new Map();
+  const backupKey = id => `lnm-unsynced-${currentUser?.id}-${id}`;
+  function backupPending(id,payload){try{localStorage.setItem(backupKey(id),JSON.stringify(payload))}catch(e){console.error('Backup local indisponível',e);setSync('Atenção: backup local indisponível',true)}}
+  function clearBackup(id){try{localStorage.removeItem(backupKey(id))}catch(e){console.warn(e)}}
 
   const qs = selector => document.querySelector(selector);
 
@@ -161,6 +164,28 @@
     db = activeBusiness().data;
     filter = '';
     category = 'Todos';
+    // Restaura alterações locais não confirmadas, sem sobrescrever silenciosamente o banco.
+    for(const business of businesses){
+      try{
+        const raw=localStorage.getItem(backupKey(business.id));
+        if(!raw)continue;
+        const payload=JSON.parse(raw);
+        if(!payload?.data)continue;
+        const localTime=Date.parse(payload.updated_at)||0;
+        const serverTime=Date.parse(business.updatedAt)||0;
+        if(localTime>=serverTime){
+          business.data=normalizeData(payload.data,payload.name||business.name,payload.type||business.type);
+          business.name=payload.name||business.name;
+          business.type=payload.type||business.type;
+          pendingWrites.set(business.id,payload);
+        }else{
+          // Não descartar o backup automaticamente: a confirmação de gravação exige leitura do banco.
+          pendingWrites.set(business.id,payload);
+        }
+      }catch(error){console.error('Falha ao recuperar backup',error)}
+    }
+    db=activeBusiness().data;
+    if(pendingWrites.size){setSync('Recuperando dados pendentes…');setTimeout(flushWrites,1000)}
   }
 
   function setSync(text, isError = false) {
@@ -172,26 +197,38 @@
 
   async function flushWrites() {
     clearTimeout(flushTimer);
-    if(flushingPromise)return flushingPromise.then(()=>pendingWrites.size?flushWrites():true);
+    if(flushingPromise)return flushingPromise.then(ok=>pendingWrites.size&&ok?flushWrites():ok);
     if(!pendingWrites.size)return true;
     flushingPromise=(async()=>{
       setSync('Salvando na nuvem…');
       for(const [id,payload] of [...pendingWrites]){
-        const {data,error}=await api.from('businesses').update(payload).eq('id',id).select('id,updated_at');
-        if(error||!data?.length){
-          console.error('Falha ao persistir empresa',id,error);
-          setSync('Não salvo — tente novamente',true);
+        try{
+          const {data,error}=await api.from('businesses').update({
+            name:payload.name,type:payload.type,data:payload.data,updated_at:payload.updated_at
+          }).eq('id',id).select('id,data,updated_at').maybeSingle();
+          if(error||!data){throw error||new Error('Banco não confirmou a atualização da empresa');}
+          // A resposta precisa conter exatamente o conteúdo que acabamos de salvar.
+          if(JSON.stringify(data.data)!==JSON.stringify(payload.data)){
+            // Comparação por conteúdo, independente da ordem das chaves JSON.
+            const canonical=o=>JSON.stringify(o,Object.keys(o||{}).sort());
+            if(canonical(data.data)!==canonical(payload.data))throw new Error('O banco retornou dados diferentes do cadastro');
+          }
+          if(pendingWrites.get(id)===payload){
+            pendingWrites.delete(id);clearBackup(id);
+          }
+        }catch(error){
+          console.error('Falha no salvamento',id,error);
+          setSync('ERRO: dados não salvos na nuvem',true);
+          toast('Falha ao salvar: '+(error?.message||'verifique a conexão'));
           return false;
         }
-        // Uma edição mais recente nunca deve ser descartada pela resposta de uma gravação anterior.
-        if(pendingWrites.get(id)===payload)pendingWrites.delete(id);
       }
       if(!pendingWrites.size){setSync('Salvo na nuvem ✓');return true}
-      return false;
+      return true;
     })();
     try{return await flushingPromise}finally{
       flushingPromise=null;
-      if(pendingWrites.size&&!signingOut){clearTimeout(flushTimer);flushTimer=setTimeout(flushWrites,5000)}
+      if(pendingWrites.size&&!signingOut){clearTimeout(flushTimer);flushTimer=setTimeout(flushWrites,4000)}
     }
   }
 
@@ -202,12 +239,14 @@
     business.name = db.company;
     business.type = db.type || business.type;
     business.updatedAt = new Date().toISOString();
-    pendingWrites.set(business.id, {
+    const payload={
       name: business.name,
       type: business.type,
       data: structuredClone(business.data),
       updated_at: business.updatedAt
-    });
+    };
+    pendingWrites.set(business.id,payload);
+    backupPending(business.id,payload);
     renderAll();
     setSync('Salvamento automático pendente…');
     clearTimeout(flushTimer);
@@ -346,6 +385,7 @@
     const localRenderAll = renderAll;
     renderCompanySwitch = cloudCompanySwitch;
     save = cloudSave;
+    window.save = cloudSave;
     switchBusiness = cloudSwitchBusiness;
     createBusiness = cloudCreateBusiness;
     renderAll = function () {
